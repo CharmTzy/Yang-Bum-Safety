@@ -4,7 +4,7 @@ window.db = null;
 
 async function loadFirebaseConfig() {
   try {
-    const res = await fetch("https://yang-bum-safety.onrender.com/firebase-config");
+    const res = await fetch("http://localhost:5500/firebase-config");
     const config = await res.json();
 
     firebase.initializeApp(config);
