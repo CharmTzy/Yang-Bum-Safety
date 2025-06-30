@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Quiz Management - Safety Aware</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" />
+    <link rel="stylesheet" href="css/admin.css" />
+  </head>
+  <body>
+    <div class="d-flex" id="wrapper">
+      <!-- Sidebar -->
+      <div class="bg-dark text-white p-3 sidebar">
+        <h4 class="mb-4">Admin Panel</h4>
+        <ul class="nav flex-column">
+          <li class="nav-item mb-2">
+            <a class="nav-link text-white" href="admin.html">Dashboard</a>
+          </li>
+          <li class="nav-item mb-2">
+            <a class="nav-link text-white" href="quiz.html">Quiz</a>
+          </li>
+          <li class="nav-item mb-2">
+            <a class="nav-link text-white" href="#">Reports</a>
+          </li>
+          <li class="nav-item mb-2">
+            <a class="nav-link text-white" href="#">Settings</a>
+          </li>
+          <li class="nav-item mt-4">
+            <button class="btn btn-danger btn-sm" onclick="logout()">Logout</button>
+          </li>
+        </ul>
+      </div>
+
+      <!-- Page Content -->
+      <div class="p-4 content">
+        <h2>Manage Quizzes</h2>
+        <button class="btn btn-primary" onclick="showAddQuizModal()">Add New Quiz</button>
+
+        <!-- Quiz Table -->
+        <h3 class="mt-5">Existing Quizzes</h3>
+        <table class="table">
+          <thead>
+            <tr>
+              <th scope="col">Question</th>
+              <th scope="col">Options</th>
+              <th scope="col">Correct Answer</th>
+              <th scope="col">Added/Updated</th>
+              <th scope="col">Actions</th>
+            </tr>
+          </thead>
+          <tbody id="quizTableBody">
+            <!-- Quizzes will be populated here -->
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Add / Edit Quiz Modal -->
+    <div class="modal fade" id="quizModal" tabindex="-1" aria-labelledby="quizModalLabel" aria-hidden="true">
+      <div class="modal-dialog">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h5 class="modal-title" id="quizModalLabel">Add Quiz</h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+          </div>
+          <div class="modal-body">
+            <form id="quizForm">
+              <div class="mb-3">
+                <label for="question" class="form-label">Question</label>
+                <input type="text" class="form-control" id="question" required />
+              </div>
+              <div class="mb-3">
+                <label for="options" class="form-label">Options (comma separated)</label>
+                <input type="text" class="form-control" id="options" required />
+              </div>
+              <div class="mb-3">
+                <label for="correctAnswer" class="form-label">Correct Answer</label>
+                <input type="text" class="form-control" id="correctAnswer" required />
+              </div>
+              <input type="hidden" id="quizId" />
+              <button type="submit" class="btn btn-success">Save Quiz</button>
+            </form>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Bootstrap JS -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+
+    <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-firestore-compat.js"></script>
+    <script src="../js/firebase-init.js"></script>
+    <script>
+      window.onload = () => {
+        const userStr = localStorage.getItem("safetyAwareUser");
+        if (!userStr) {
+          window.location.href = "/login.html";
+          return;
+        }
+
+        const user = JSON.parse(userStr);
+
+        // Wait for firebase to initialize
+        document.addEventListener("firebaseReady", () => {
+          auth.onAuthStateChanged(async (currentUser) => {
+            if (!currentUser || currentUser.uid !== user.uid) {
+              localStorage.removeItem("safetyAwareUser");
+              window.location.href = "/login.html";
+              return;
+            }
+
+            try {
+              const freshToken = await currentUser.getIdToken(true);
+              if (freshToken !== user.token) {
+                localStorage.setItem("safetyAwareUser", JSON.stringify({ ...user, token: freshToken }));
+              }
+
+              const doc = await db.collection("users").doc(user.uid).get();
+              if (!doc.exists || doc.data().role !== "admin") {
+                alert("Access denied");
+                localStorage.removeItem("safetyAwareUser");
+                window.location.href = "/login.html";
+                return;
+              }
+
+              // Load quizzes from Firestore
+              loadQuizzes();
+            } catch (err) {
+              console.error("Token refresh failed:", err);
+              localStorage.removeItem("safetyAwareUser");
+              window.location.href = "/login.html";
+            }
+          });
+        });
+      };
+
+      function loadQuizzes() {
+        db.collection("quizzes")
+          .orderBy("timestamp", "desc") // Sort by timestamp in descending order
+          .get()
+          .then((querySnapshot) => {
+            const quizTableBody = document.getElementById("quizTableBody");
+            quizTableBody.innerHTML = "";
+            querySnapshot.forEach((doc, index) => {
+              const quiz = doc.data();
+              const row = document.createElement("tr");
+              row.innerHTML = `
+                <td>${quiz.question}</td>
+                <td>${quiz.options.join(", ")}</td>
+                <td>${quiz.correctAnswer}</td>
+                <td>${new Date(quiz.timestamp.seconds * 1000).toLocaleString()}</td>
+                <td>
+                  <button class="btn btn-warning btn-sm" onclick="editQuiz('${doc.id}')">Edit</button>
+                  <button class="btn btn-danger btn-sm" onclick="deleteQuiz('${doc.id}')">Delete</button>
+                </td>
+              `;
+              quizTableBody.appendChild(row);
+            });
+          })
+          .catch((err) => {
+            console.error("Error loading quizzes:", err);
+          });
+      }
+
+      function showAddQuizModal() {
+        document.getElementById("quizForm").reset();
+        document.getElementById("quizId").value = ""; // Reset hidden field
+        const modalTitle = document.getElementById("quizModalLabel");
+        modalTitle.textContent = "Add Quiz";
+        const modal = new bootstrap.Modal(document.getElementById("quizModal"));
+        modal.show();
+      }
+
+      document.getElementById("quizForm").addEventListener("submit", (e) => {
+        e.preventDefault();
+
+        const question = document.getElementById("question").value;
+        const options = document.getElementById("options").value.split(",");
+        const correctAnswer = document.getElementById("correctAnswer").value;
+        const quizId = document.getElementById("quizId").value;
+
+        const timestamp = new Date();
+
+        const quizData = { question, options, correctAnswer, timestamp };
+
+        if (quizId) {
+          // Update quiz
+          db.collection("quizzes")
+            .doc(quizId)
+            .update(quizData)
+            .then(() => {
+              alert("Quiz updated successfully!");
+              loadQuizzes();
+              const modal = bootstrap.Modal.getInstance(document.getElementById("quizModal"));
+              modal.hide();
+            })
+            .catch((err) => {
+              console.error("Error updating quiz:", err);
+            });
+        } else {
+          // Add new quiz
+          db.collection("quizzes")
+            .add(quizData)
+            .then(() => {
+              alert("Quiz added successfully!");
+              loadQuizzes();
+              const modal = bootstrap.Modal.getInstance(document.getElementById("quizModal"));
+              modal.hide();
+            })
+            .catch((err) => {
+              console.error("Error adding quiz:", err);
+            });
+        }
+      });
+
+      function editQuiz(quizId) {
+        db.collection("quizzes")
+          .doc(quizId)
+          .get()
+          .then((doc) => {
+            if (doc.exists) {
+              const quiz = doc.data();
+              document.getElementById("question").value = quiz.question;
+              document.getElementById("options").value = quiz.options.join(", ");
+              document.getElementById("correctAnswer").value = quiz.correctAnswer;
+              document.getElementById("quizId").value = quizId;
+
+              const modalTitle = document.getElementById("quizModalLabel");
+              modalTitle.textContent = "Edit Quiz";
+              const modal = new bootstrap.Modal(document.getElementById("quizModal"));
+              modal.show();
+            }
+          })
+          .catch((err) => {
+            console.error("Error fetching quiz:", err);
+          });
+      }
+
+      function deleteQuiz(quizId) {
+        if (confirm("Are you sure you want to delete this quiz?")) {
+          db.collection("quizzes")
+            .doc(quizId)
+            .delete()
+            .then(() => {
+              alert("Quiz deleted successfully!");
+              loadQuizzes();
+            })
+            .catch((err) => {
+              console.error("Error deleting quiz:", err);
+            });
+        }
+      }
+
+      function logout() {
+        auth.signOut();
+        localStorage.removeItem("safetyAwareUser");
+        window.location.href = "/login.html";
+      }
+    </script>
+  </body>
+</html>
