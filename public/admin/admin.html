@@ -48,29 +48,43 @@
     <script src="../js/firebase-init.js"></script>
     <script>
       window.onload = () => {
-        const userStr = localStorage.getItem("safetyAwareUser");
-        if (!userStr) {
-          window.location.href = "/login.html";
-          return;
-        }
+        // Wait for Firebase to be initialized before proceeding
+        document.addEventListener("firebaseReady", async () => {
+          // Retrieve user info from localStorage
+          const userStr = localStorage.getItem("safetyAwareUser");
+          if (!userStr) {
+            window.location.href = "/login.html";
+            return;
+          }
 
-        const user = JSON.parse(userStr);
+          const user = JSON.parse(userStr);
 
-        // Wait for firebase to initialize
-        document.addEventListener("firebaseReady", () => {
+          // Check the authentication state of the current user
           auth.onAuthStateChanged(async (currentUser) => {
-            if (!currentUser || currentUser.uid !== user.uid) {
+            // If there is no authenticated user, log out
+            if (!currentUser) {
               localStorage.removeItem("safetyAwareUser");
               window.location.href = "/login.html";
               return;
             }
 
-            try {
-              const freshToken = await currentUser.getIdToken(true);
-              if (freshToken !== user.token) {
-                localStorage.setItem("safetyAwareUser", JSON.stringify({ ...user, token: freshToken }));
-              }
+            // Ensure that the current user matches the one stored in localStorage
+            if (currentUser.uid !== user.uid) {
+              localStorage.removeItem("safetyAwareUser");
+              window.location.href = "/login.html";
+              return;
+            }
+            const storedToken = user.token;
+            const currentToken = await currentUser.getIdToken();
 
+            if (storedToken !== currentToken) {
+              console.log("Token mismatch, logging out");
+              localStorage.removeItem("safetyAwareUser");
+              window.location.href = "/login.html";
+              return;
+            }
+            try {
+              // Verify user role in Firestore
               const doc = await db.collection("users").doc(user.uid).get();
               if (!doc.exists || doc.data().role !== "admin") {
                 alert("Access denied");
@@ -78,9 +92,8 @@
                 window.location.href = "/login.html";
                 return;
               }
-              // User verified - show admin content here
             } catch (err) {
-              console.error("Token refresh failed:", err);
+              console.error("Error verifying token:", err);
               localStorage.removeItem("safetyAwareUser");
               window.location.href = "/login.html";
             }

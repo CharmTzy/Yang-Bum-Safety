@@ -94,44 +94,50 @@
     <script src="../js/firebase-init.js"></script>
     <script>
       window.onload = () => {
-        const userStr = localStorage.getItem("safetyAwareUser");
-        if (!userStr) {
-          window.location.href = "/login.html";
-          return;
-        }
+        document.addEventListener("firebaseReady", async () => {
+          const userStr = localStorage.getItem("safetyAwareUser");
+          if (!userStr) {
+            window.location.href = "/login.html";
+            return;
+          }
 
-        const user = JSON.parse(userStr);
+          const user = JSON.parse(userStr);
 
-        // Wait for firebase to initialize
-        document.addEventListener("firebaseReady", () => {
           auth.onAuthStateChanged(async (currentUser) => {
-            if (!currentUser || currentUser.uid !== user.uid) {
+            // If no user is authenticated, log out
+            if (!currentUser) {
               localStorage.removeItem("safetyAwareUser");
               window.location.href = "/login.html";
               return;
             }
 
-            try {
-              const freshToken = await currentUser.getIdToken(true);
-              if (freshToken !== user.token) {
-                localStorage.setItem("safetyAwareUser", JSON.stringify({ ...user, token: freshToken }));
-              }
-
-              const doc = await db.collection("users").doc(user.uid).get();
-              if (!doc.exists || doc.data().role !== "admin") {
-                alert("Access denied");
-                localStorage.removeItem("safetyAwareUser");
-                window.location.href = "/login.html";
-                return;
-              }
-
-              // Load quizzes from Firestore
-              loadQuizzes();
-            } catch (err) {
-              console.error("Token refresh failed:", err);
+            // Ensure the user is still the same and session has not expired
+            if (currentUser.uid !== user.uid) {
               localStorage.removeItem("safetyAwareUser");
               window.location.href = "/login.html";
+              return;
             }
+
+            // Verify user role in Firestore
+            const doc = await db.collection("users").doc(user.uid).get();
+            if (!doc.exists || doc.data().role !== "admin") {
+              alert("Access denied");
+              localStorage.removeItem("safetyAwareUser");
+              window.location.href = "/login.html";
+              return;
+            }
+
+            // If token in localStorage matches, proceed
+            const storedToken = user.token;
+            const currentToken = await currentUser.getIdToken();
+
+            if (storedToken !== currentToken) {
+              localStorage.removeItem("safetyAwareUser");
+              window.location.href = "/login.html";
+              return;
+            }
+
+            loadQuizzes();
           });
         });
       };
@@ -147,15 +153,15 @@
               const quiz = doc.data();
               const row = document.createElement("tr");
               row.innerHTML = `
-                <td>${quiz.question}</td>
-                <td>${quiz.options.join(", ")}</td>
-                <td>${quiz.correctAnswer}</td>
-                <td>${new Date(quiz.timestamp.seconds * 1000).toLocaleString()}</td>
-                <td>
-                  <button class="btn btn-warning btn-sm" onclick="editQuiz('${doc.id}')">Edit</button>
-                  <button class="btn btn-danger btn-sm" onclick="deleteQuiz('${doc.id}')">Delete</button>
-                </td>
-              `;
+            <td>${quiz.question}</td>
+            <td>${quiz.options.join(", ")}</td>
+            <td>${quiz.correctAnswer}</td>
+            <td>${new Date(quiz.timestamp.seconds * 1000).toLocaleString()}</td>
+            <td>
+              <button class="btn btn-warning btn-sm" onclick="editQuiz('${doc.id}')">Edit</button>
+              <button class="btn btn-danger btn-sm" onclick="deleteQuiz('${doc.id}')">Delete</button>
+            </td>
+          `;
               quizTableBody.appendChild(row);
             });
           })
@@ -166,7 +172,7 @@
 
       function showAddQuizModal() {
         document.getElementById("quizForm").reset();
-        document.getElementById("quizId").value = ""; // Reset hidden field
+        document.getElementById("quizId").value = "";
         const modalTitle = document.getElementById("quizModalLabel");
         modalTitle.textContent = "Add Quiz";
         const modal = new bootstrap.Modal(document.getElementById("quizModal"));
