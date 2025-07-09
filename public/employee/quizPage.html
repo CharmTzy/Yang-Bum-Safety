@@ -5,6 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Quiz - Safety Aware</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" />
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- Chart.js for the percentage circle -->
     <style>
       body {
         background: #f7f9fc;
@@ -44,11 +46,53 @@
         margin-top: 1.5rem;
         font-weight: bold;
         font-size: 1.2rem;
+        padding: 15px;
+        border-radius: 8px;
+        background-color: #f8f9fa;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        text-align: center;
       }
 
       .btn-next {
         background-color: #007bff;
         color: white;
+      }
+
+      .quiz-number {
+        font-size: 1.2rem;
+        margin-bottom: 1rem;
+        font-weight: bold;
+        text-align: center;
+      }
+
+      .quiz-number button {
+        margin: 0 5px;
+        font-size: 1rem;
+      }
+
+      .correct {
+        color: green;
+        font-weight: bold;
+      }
+
+      .incorrect {
+        color: red;
+        font-weight: bold;
+      }
+
+      .result-message {
+        font-size: 1.5rem;
+      }
+
+      .active-quiz {
+        background-color: #28a745; /* Green color for active quiz */
+        color: white;
+      }
+
+      #resultCanvas {
+        margin-top: 20px;
+        max-width: 200px;
+        max-height: 200px;
       }
     </style>
   </head>
@@ -77,6 +121,7 @@
 
     <div class="quiz-container">
       <div id="quiz">
+        <div class="quiz-number" id="quizNumber"></div>
         <div class="question" id="question">Loading question...</div>
         <div id="options"></div>
         <div class="result" id="result"></div>
@@ -93,14 +138,14 @@
       let quizIndex = 0;
       let score = 0;
       let quizData = [];
+      const maxQuizzes = 10; // Limit to 10 quizzes
+      const answeredQuizzes = []; // Array to track answered quizzes
 
       window.onload = () => {
-        // Wait for Firebase to be initialized before calling fetchQuizzes
-        document.addEventListener("firebaseReady", fetchQuizzes);  // Listen for Firebase initialization
+        document.addEventListener("firebaseReady", fetchQuizzes);
       };
 
       function fetchQuizzes() {
-        // Now Firebase is initialized, let's fetch quizzes
         if (!window.db) {
           console.error("Firebase Firestore is not initialized yet.");
           return;
@@ -109,6 +154,7 @@
         window.db
           .collection("quizzes")
           .orderBy("timestamp", "desc")
+          .limit(maxQuizzes) // Limit the quizzes to 10
           .get()
           .then((querySnapshot) => {
             quizData = [];
@@ -116,7 +162,8 @@
               quizData.push(doc.data());
             });
 
-            loadQuestion();  // Now that we have quiz data, load the first question
+            loadQuestion();
+            displayQuizNumber(); // Display quiz numbers
           })
           .catch((err) => {
             console.error("Error loading quizzes:", err);
@@ -148,23 +195,76 @@
 
         if (selectedAnswer === correct) {
           result.textContent = "Correct!";
-          result.style.color = "green";
+          result.className = "result correct";
           score++;
         } else {
           result.textContent = `Wrong! Correct answer: ${quizData[quizIndex].correctAnswer}`;
-          result.style.color = "red";
+          result.className = "result incorrect";
         }
 
         document.querySelectorAll(".option-btn").forEach((btn) => (btn.disabled = true));
         document.getElementById("nextBtn").style.display = "inline-block";
+
+        answeredQuizzes.push(quizIndex);
       }
 
       function nextQuestion() {
-        quizIndex++;
-        if (quizIndex < quizData.length) {
-          loadQuestion();
+        if (answeredQuizzes.length === quizData.length) {
+          showResult();
         } else {
-          document.getElementById("quiz").innerHTML = `<h4>You scored ${score} out of ${quizData.length}!</h4>`;
+          quizIndex++;
+          if (quizIndex < quizData.length) {
+            loadQuestion();
+            displayQuizNumber();
+          }
+        }
+      }
+
+      function showResult() {
+        const percentage = (score / quizData.length) * 100;
+        document.getElementById("quiz").innerHTML = `
+          <div class="result">
+            <div class="result-message">Quiz Completed!</div>
+            <div>Your score: ${score} out of ${quizData.length}</div>
+          </div>`;
+      }
+
+      function displayQuizNumber() {
+        const quizNumberDiv = document.getElementById("quizNumber");
+        quizNumberDiv.innerHTML = "";
+
+        for (let i = 0; i < quizData.length; i++) {
+          const btn = document.createElement("button");
+          btn.textContent = `${i + 1}/${maxQuizzes}`;
+          btn.className = "btn btn-outline-secondary";
+          btn.onclick = () => goToQuiz(i);
+
+          // If quiz is answered, show a tick
+          if (answeredQuizzes.includes(i)) {
+            btn.textContent = `✔️ ${i + 1}/${maxQuizzes}`;
+          }
+
+          // Highlight current quiz in green only after clicking "Next"
+          if (i === quizIndex && !answeredQuizzes.includes(i)) {
+            btn.classList.add("active-quiz");
+          } else {
+            btn.classList.remove("active-quiz");
+          }
+
+          // Disable navigation to answered quizzes
+          if (answeredQuizzes.includes(i)) {
+            btn.disabled = true;
+          }
+
+          quizNumberDiv.appendChild(btn);
+        }
+      }
+
+      function goToQuiz(index) {
+        if (!answeredQuizzes.includes(index)) {
+          quizIndex = index;
+          loadQuestion();
+          displayQuizNumber(); // Update indicator button after navigating to a quiz
         }
       }
 
