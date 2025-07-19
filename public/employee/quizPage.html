@@ -85,12 +85,13 @@
       }
 
       .active-quiz {
-        background-color: #28a745; /* Green color for active quiz */
+        background-color: #28a745;
         color: white;
       }
 
-      #resultCanvas {
-        margin-top: 20px;
+      canvas#resultCanvas {
+        display: block;
+        margin: 20px auto;
         max-width: 200px;
         max-height: 200px;
       }
@@ -99,7 +100,7 @@
   <body>
     <nav class="navbar navbar-expand-lg">
       <div class="container-fluid">
-        <a class="navbar-brand" href="#">Safety Aware</a>
+        <a class="navbar-brand" href="#">Workplace Safety Awareness Quiz</a>
         <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
           <span class="navbar-toggler-icon"></span>
         </button>
@@ -138,12 +139,24 @@
       let quizIndex = 0;
       let score = 0;
       let quizData = [];
-      const maxQuizzes = 10; // Limit to 10 quizzes
-      const answeredQuizzes = []; // Array to track answered quizzes
+      const maxQuizzes = 10;
+      const answeredQuizzes = [];
 
-      window.onload = () => {
-        document.addEventListener("firebaseReady", fetchQuizzes);
-      };
+      document.addEventListener("firebaseReady", () => {
+        if (!loadQuizState()) {
+          fetchQuizzes();
+        } else {
+          loadQuestion();
+          displayQuizNumber();
+        }
+      });
+
+      function shuffleArray(array) {
+        return array
+          .map((value) => ({ value, sort: Math.random() }))
+          .sort((a, b) => a.sort - b.sort)
+          .map(({ value }) => value);
+      }
 
       function fetchQuizzes() {
         if (!window.db) {
@@ -153,17 +166,18 @@
 
         window.db
           .collection("quizzes")
-          .orderBy("timestamp", "desc")
-          .limit(maxQuizzes) // Limit the quizzes to 10
           .get()
           .then((querySnapshot) => {
-            quizData = [];
+            const allQuizzes = [];
             querySnapshot.forEach((doc) => {
-              quizData.push(doc.data());
+              allQuizzes.push(doc.data());
             });
 
+            const shuffled = shuffleArray(allQuizzes);
+            quizData = shuffled.slice(0, maxQuizzes);
+
             loadQuestion();
-            displayQuizNumber(); // Display quiz numbers
+            displayQuizNumber();
           })
           .catch((err) => {
             console.error("Error loading quizzes:", err);
@@ -178,19 +192,21 @@
         document.getElementById("result").textContent = "";
         document.getElementById("nextBtn").style.display = "none";
 
-        current.options.forEach((option, index) => {
+        const originalOptions = current.options;
+        const shuffledOptions = shuffleArray([...originalOptions]);
+
+        shuffledOptions.forEach((option) => {
           const btn = document.createElement("button");
           btn.className = "btn btn-outline-primary option-btn";
           btn.textContent = option;
-          btn.onclick = () => handleAnswer(index);
+          btn.onclick = () => handleAnswer(option);
           optionsDiv.appendChild(btn);
         });
       }
 
-      function handleAnswer(selected) {
+      function handleAnswer(selectedAnswer) {
         const correct = quizData[quizIndex].correctAnswer.trim().toLowerCase();
-        const selectedAnswer = quizData[quizIndex].options[selected].trim().toLowerCase();
-
+        selectedAnswer = selectedAnswer.trim().toLowerCase();
         const result = document.getElementById("result");
 
         if (selectedAnswer === correct) {
@@ -206,6 +222,7 @@
         document.getElementById("nextBtn").style.display = "inline-block";
 
         answeredQuizzes.push(quizIndex);
+        saveQuizState();
       }
 
       function nextQuestion() {
@@ -213,20 +230,114 @@
           showResult();
         } else {
           quizIndex++;
+          saveQuizState();
           if (quizIndex < quizData.length) {
             loadQuestion();
             displayQuizNumber();
           }
         }
       }
+      function saveQuizState() {
+        const state = {
+          quizData,
+          quizIndex,
+          score,
+          answeredQuizzes,
+        };
+        localStorage.setItem("quizState", JSON.stringify(state));
+      }
+
+      function loadQuizState() {
+        const saved = localStorage.getItem("quizState");
+        if (saved) {
+          const state = JSON.parse(saved);
+          quizData = state.quizData;
+          quizIndex = state.quizIndex;
+          score = state.score;
+          answeredQuizzes.length = 0;
+          state.answeredQuizzes.forEach((i) => answeredQuizzes.push(i));
+          return true;
+        }
+        return false;
+      }
+
+      function clearQuizState() {
+        localStorage.removeItem("quizState");
+      }
+
+      function drawResultChart(percentage) {
+        const ctx = document.getElementById("resultCanvas").getContext("2d");
+        new Chart(ctx, {
+          type: "doughnut",
+          data: {
+            datasets: [
+              {
+                data: [percentage, 100 - percentage],
+                backgroundColor: ["#28a745", "#e9ecef"],
+                borderWidth: 0,
+              },
+            ],
+          },
+          options: {
+            cutout: "75%",
+            plugins: {
+              tooltip: { enabled: false },
+              legend: { display: false },
+              title: { display: false },
+            },
+          },
+          plugins: [
+            {
+              id: "centerText",
+              beforeDraw: function (chart) {
+                const width = chart.width,
+                  height = chart.height,
+                  ctx = chart.ctx;
+
+                ctx.restore();
+                const fontSize = (height / 100).toFixed(2);
+                ctx.font = fontSize + "em sans-serif";
+                ctx.textBaseline = "middle";
+
+                const text = percentage + "%",
+                  textX = Math.round((width - ctx.measureText(text).width) / 2),
+                  textY = height / 2;
+
+                ctx.fillStyle = "#28a745";
+                ctx.fillText(text, textX, textY);
+                ctx.save();
+              },
+            },
+          ],
+        });
+      }
 
       function showResult() {
-        const percentage = (score / quizData.length) * 100;
+        const percentage = Math.round((score / quizData.length) * 100);
+        const passed = score >= 8;
+
+        const user = firebase.auth().currentUser;
+        if (user) {
+          const userId = user.uid;
+          const userRef = db.collection("users").doc(userId);
+
+          userRef.get().then((doc) => {
+            const previousMax = doc.exists && doc.data().quizMark ? doc.data().quizMark : 0;
+            const newMax = Math.max(score, previousMax);
+
+            userRef.set({ quizMark: newMax }, { merge: true });
+          });
+        }
+
         document.getElementById("quiz").innerHTML = `
-          <div class="result">
-            <div class="result-message">Quiz Completed!</div>
-            <div>Your score: ${score} out of ${quizData.length}</div>
-          </div>`;
+        <div class="result">
+          <div class="result-message">${passed ? "✅ Passed!" : "❌ Failed!"}</div>
+          <canvas id="resultCanvas"></canvas>
+          ${!passed ? '<button class="btn btn-danger mt-3" onclick="location.reload()">Retake Quiz</button>' : ""}
+        </div>`;
+
+        drawResultChart(percentage);
+        clearQuizState();
       }
 
       function displayQuizNumber() {
